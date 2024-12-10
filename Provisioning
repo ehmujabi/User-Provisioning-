@@ -1,0 +1,91 @@
+//configure environmental variables
+AUTH0_DOMAIN
+AUTH0_CLIENT_ID
+AUTH0_SECRET
+export AUTH0_DOMAIN='<auth0-domain>'
+export AUTH0_CLIENT_ID='<auth0-client-id>'
+export AUTH0_SECRET='<auth0-secret>'
+export TEST_HOST='<test-host>'
+export TEST_TOKEN='<test-token>'
+export TEST_WORKSPACE_ID='<test-workspace-id>'
+//create user groups in Test
+def create_user_groups():
+    # adminGroup already exists, it means that only userGroup needs to be created
+    user_group = CatalogUserGroup.init(user_group_id="userGroup")
+    test_sdk.catalog_user.create_or_update_user_group(user_group=user_group)
+// create permission
+def create_permissions():
+    declarative_permissions = test_sdk.catalog_permission
+        .get_declarative_permissions(test_workspace_id)
+    admin_group_permissions = {
+        "name": "MANAGE",
+        "assignee": {
+             "id": "adminGroup",
+             "type": "userGroup"
+        }
+    }
+    user_group_permissions = {
+        "name": "VIEW",
+        "assignee": {
+            "id": "userGroup",
+            "type": "userGroup"
+        }
+    }
+
+    declarative_permissions.permissions = [admin_group_permissions, user_group_permissions]
+    test_sdk.catalog_permission
+        .put_declarative_permissions(test_workspace_id, declarative_permissions)
+
+// Provision users from Auth0 to test the most important part is correctly mapping users from OID provider to TEST
+
+def get_auth0_users():
+    return auth0.users.list()
+
+def get_auth0_user_role(auth_id: str):
+    return auth0.users.list_roles(auth_id)
+
+// Assigning appropriate permissions 
+def create_or_update_user(user_id: str, authentication_id: str, user_group_ids: List[str]):
+    test_sdk.catalog_user.create_or_update_user(
+        CatalogUser.init(
+            user_id,
+            authentication_id,
+            user_group_ids
+        )
+    )
+
+
+def provision_users():
+    users = get_auth0_users()
+
+    for user in users["users"]:
+        # user_id is the authentication_id in this case, it is auth0|<user_id>
+        auth_id = user["user_id"]
+        user_id = auth_id.replace("auth0|", "")
+        # user can have assigned more roles, I assigned just one
+        role = get_auth0_user_role(auth_id)["roles"][0]
+        role_name = role["name"]
+
+
+        # if user has an admin role, it is assigned to adminGroup
+        if role_name == "Admin":
+            create_or_update_user(user_id, auth_id, ["adminGroup"])
+        else:
+            create_or_update_user(user_id, auth_id, ["userGroup"])
+
+// Automation of user Provisioning
+def run_provisioning():
+    print("Checking new users...")
+    create_user_groups()
+    create_permissions()
+    provision_users()
+    print("Done")
+
+
+schedule.every(1).hour.do(run_provisioning)
+
+while True:
+    schedule.run_pending()
+    time.sleep(1)
+
+
